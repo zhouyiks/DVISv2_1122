@@ -156,7 +156,7 @@ class VideoInstanceCutter(nn.Module):
 
         self.decoder_norm = nn.LayerNorm(hidden_dim)
 
-        self.noiser = Noiser(mode='rand_binary_fuse')
+        self.noiser = Noiser(noise_ratio=0.5, mode='rand_binary_fuse')
         self.activation = MLP(hidden_dim, hidden_dim, 1, 3)
 
         self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
