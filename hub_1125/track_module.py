@@ -395,14 +395,10 @@ class VideoInstanceCutter(nn.Module):
                         continue
                     anchor_embedding = old_new_reid_embeds[src_i, 0, :]
                     positive_embedding = curr_reid_embeds[src_i, 0, :]
-                    negative_query_id_1 = sorted(
-                        random.sample(set(range(old_new_reid_embeds.shape[0])) - set([src_i]),
-                                      old_new_reid_embeds.shape[0] - 1))
-                    negative_query_id_2 = sorted(
+                    negative_query_id = sorted(
                         random.sample(set(range(curr_reid_embeds.shape[0])) - set([src_i]),
                                       curr_reid_embeds.shape[0] - 1))
-                    negative_embedding = torch.cat([old_new_reid_embeds[negative_query_id_1, 0, :],
-                                                    curr_reid_embeds[negative_query_id_2, 0, :]], dim=0)
+                    negative_embedding = curr_reid_embeds[negative_query_id, 0, :]
                     reid_out = {
                         "anchor_embedding": anchor_embedding,
                         "positive_embedding": positive_embedding,
