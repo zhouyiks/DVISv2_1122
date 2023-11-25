@@ -132,6 +132,7 @@ class VideoInstanceCutter(nn.Module):
                 weight_init.c2_xavier_fill(layer)
         else:
             self.reid_embed = torch.nn.Identity()  # do nothing
+        self.num_reid_head_layers = num_reid_head_layers
 
         # mask features projection
         self.mask_feature_proj = nn.Conv2d(
@@ -368,7 +369,7 @@ class VideoInstanceCutter(nn.Module):
                     valid_track_query = torch.ones(size=(ms_output.shape[1],)).to("cuda") < 0
                     valid_track_query[indices[0][0]] = True
 
-            if not using_thr:
+            if self.num_reid_head_layers <= 0:
                 # if self.disappear_trcQ_id is not None:
                 #     valid_track_query[self.disappear_trcQ_id] = False  # as this query was used as disappearance modeling
                 select_query_tgt_ids = tgt_ids_for_each_query[valid_track_query]  # q',
