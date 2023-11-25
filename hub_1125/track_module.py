@@ -79,6 +79,8 @@ class VideoInstanceCutter(nn.Module):
         num_reid_head_layers: int = 3,
         match_type: str = 'greedy',
         match_score_thr: float = 0.3,
+
+        warming_layer_num: int = 3,
     ):
         super().__init__()
 
