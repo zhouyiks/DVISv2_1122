@@ -1,3 +1,4 @@
+import math
 import random
 
 import torch
@@ -56,7 +57,14 @@ class VideoInstanceSequence(object):
 
             # a_sq = all_pos_embed.pow(2).sum(1).unsqueeze(1)  # n, 1
             # ab = all_pos_embed @ pos_embed.unsqueeze(1)  # (n, c) @ (c, 1) -> (n, 1)
-            # affinity = (2*ab - a_sq)
+            # affinity = (2*ab - a_sq) / math.sqrt(pos_embed.shape[0])
+            # # softmax operation
+            # maxes = torch.max(affinity, dim=0, keepdim=True)[0]
+            # x_exp = torch.exp(affinity - maxes)
+            # x_exp_sum = torch.sum(x_exp, dim=1, keepdim=True)
+            # affinity = x_exp / x_exp_sum  # (n, 1)
+            # affinity = affinity.squeeze(1)
+            #
 
             # TODO, using different similarity function
             beta = max(0, similarity)
@@ -353,7 +361,7 @@ class VideoInstanceCutter(nn.Module):
                     valid_track_query = torch.ones(size=(ms_output.shape[1],)).to("cuda") < 0
                     valid_track_query[indices[0][0]] = True
 
-            if self.num_reid_head_layers <= 0:
+            if not using_thr:
                 select_query_tgt_ids = tgt_ids_for_each_query[valid_track_query]  # q',
 
                 self.track_queries = ms_output[-1][valid_track_query]  # q', b, c
