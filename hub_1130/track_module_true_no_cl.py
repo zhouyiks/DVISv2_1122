@@ -205,14 +205,14 @@ class VideoInstanceCutter(nn.Module):
             padding=0
         )
 
-        # self.query_k = MLP(hidden_dim, hidden_dim, mask_dim, 3)
-        # self.mask_feature_k = nn.Conv2d(
-        #     mask_dim,
-        #     mask_dim,
-        #     kernel_size=1,
-        #     stride=1,
-        #     padding=0
-        # )
+        self.query_k = MLP(hidden_dim, hidden_dim, mask_dim, 3)
+        self.mask_feature_k = nn.Conv2d(
+            mask_dim,
+            mask_dim,
+            kernel_size=1,
+            stride=1,
+            padding=0
+        )
 
         self.new_ins_embeds = nn.Embedding(1, hidden_dim)
         self.disappear_embed = nn.Embedding(1, hidden_dim)
@@ -292,7 +292,7 @@ class VideoInstanceCutter(nn.Module):
         ori_mask_features = mask_features
         mask_features_shape = mask_features.shape
         mask_features = self.mask_feature_proj(mask_features.flatten(0, 1)).reshape(*mask_features_shape)  # (b, t, c, h, w)
-        mask_out_bg = False
+        mask_out_bg = True
 
         frame_embeds_no_norm = frame_embeds_no_norm.permute(2, 3, 0, 1)  # t, q, b, c
         # frame_reid_embeds = frame_reid_embeds.permute(2, 3, 0, 1)  # t, q, b, c
@@ -532,7 +532,7 @@ class VideoInstanceCutter(nn.Module):
         mask_features_shape = mask_features.shape
         mask_features = self.mask_feature_proj(mask_features.flatten(0, 1)).reshape(
             *mask_features_shape)  # (b, t, c, h, w)
-        mask_out_bg = False
+        mask_out_bg = True
 
         frame_embeds_no_norm = frame_embeds_no_norm.permute(2, 3, 0, 1)  # t, q, b, c
         T, fQ, B, _ = frame_embeds_no_norm.shape
@@ -662,11 +662,11 @@ class VideoInstanceCutter(nn.Module):
         mask: b, q, h, w
         mask_features: b, c, h, w
         """
-        track_queries = self.decoder_norm(track_queries)  # q, b, c
-        qk = self.mask_embed(track_queries)
+        qk = self.decoder_norm(track_queries)  # q, b, c
+        qk = self.query_k(qk)
         qk = qk.permute(1, 2, 0)  # b, c, q
         if mk is None or a_sq is None:
-            mk = self.mask_feature_proj(mask_features)  # b, c, h, w
+            mk = self.mask_feature_k(mask_features)
             mk = mk.flatten(2)  # b, c, n
             a_sq = mk.pow(2).sum(1).unsqueeze(2)  # b, n, 1
 
@@ -676,17 +676,16 @@ class VideoInstanceCutter(nn.Module):
             start = i * 50
             end = start + 50 if start + 50 < mask_logits.shape[1] else mask_logits.shape[1]
 
-            # a_sq = mk.pow(2).sum(1).unsqueeze(2)  # b, n, 1
             ab = mk.transpose(1, 2) @ qk[:, :, start:end]  # b, n, q
-
             affinity = (2 * ab - a_sq) / math.sqrt(self.hidden_dim)  # b, n, q
             if mask_out:
                 seg_mask = (mask_logits[:, start:end, :, :].sigmoid() > 0.5).to("cuda")  # b, q, h, w
                 seg_mask = seg_mask.flatten(2).transpose(1, 2)  # b, n, q
-                affinity = affinity * seg_mask
+                bg_mask = ~seg_mask
+                affinity = affinity * seg_mask - 1e+6 * bg_mask  # using -1e+6 instead of float("-inf") as values in fg, likes -6.8, adding a -inf value will cause a nan value
 
             maxes = torch.max(affinity, dim=1, keepdim=True)[0]
-            x_exp = torch.exp(affinity - maxes)
+            x_exp = torch.exp(affinity - maxes)  # same as above-mentioned problem
             x_exp_sum = torch.sum(x_exp, dim=1, keepdim=True)
             affinity = x_exp / (x_exp_sum + 1e-8)
 

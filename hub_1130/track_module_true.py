@@ -205,9 +205,14 @@ class VideoInstanceCutter(nn.Module):
             padding=0
         )
 
-        self.query_k = nn.Linear(hidden_dim, mask_dim)
-        self.mask_feature_k = nn.Linear(mask_dim, mask_dim)
-        self.mask_dim = mask_dim
+        self.query_k = MLP(hidden_dim, hidden_dim, mask_dim, 3)
+        self.mask_feature_k = nn.Conv2d(
+            mask_dim,
+            mask_dim,
+            kernel_size=1,
+            stride=1,
+            padding=0
+        )
 
         self.new_ins_embeds = nn.Embedding(1, hidden_dim)
         self.disappear_embed = nn.Embedding(1, hidden_dim)
@@ -287,7 +292,7 @@ class VideoInstanceCutter(nn.Module):
         ori_mask_features = mask_features
         mask_features_shape = mask_features.shape
         mask_features = self.mask_feature_proj(mask_features.flatten(0, 1)).reshape(*mask_features_shape)  # (b, t, c, h, w)
-        mask_out_bg = False
+        mask_out_bg = True
 
         frame_embeds_no_norm = frame_embeds_no_norm.permute(2, 3, 0, 1)  # t, q, b, c
         # frame_reid_embeds = frame_reid_embeds.permute(2, 3, 0, 1)  # t, q, b, c
@@ -456,31 +461,31 @@ class VideoInstanceCutter(nn.Module):
                 ms_output[-1], outputs_mask[-1, ...], ori_mask_features[:, i, ...],
                 mk=curr_mk, a_sq=curr_a_sq, mask_out=mask_out_bg)
 
-            # # CL loss part
-            # reid_out_list = []
-            # use_disappear_embed_count = 0 + 1
-            # curr_reid_embeds = self.reid_embed(track_embeds)  # q'+nq, b, c
-            # if i > 0:
-            #     tq_reid_embeds = self.track_reid_embeds  # q', b, c
-            #     tq_tgt2src_dict = {tgt.item(): src.item() for tgt, src in zip(self.prev_frame_indices[1],
-            #                                                                   self.prev_frame_indices[0])}
-            #     cq_tgt2src_dict = {tgt.item(): src.item() for tgt, src in zip(out_dict["indices"][0][1],
-            #                                                                   out_dict["indices"][0][0])}
-            #     for tgt_id in tq_tgt2src_dict.keys():
-            #         if self.disappear_tgt_id is not None and self.disappear_tgt_id.item() == tgt_id:
-            #             continue  # TODO
-            #         assert cq_tgt2src_dict[tgt_id] == tq_tgt2src_dict[tgt_id]
-            #         anchor_embedding = curr_reid_embeds[cq_tgt2src_dict[tgt_id], 0, :]
-            #         positive_embedding = tq_reid_embeds[tq_tgt2src_dict[tgt_id], 0, :]
-            #         negative_query_id = sorted(
-            #             random.sample(set(range(curr_reid_embeds.shape[0])) - set([cq_tgt2src_dict[tgt_id]]),
-            #                           curr_reid_embeds.shape[0] - 1))
-            #         reid_out = {
-            #             "anchor_embedding": anchor_embedding,
-            #             "positive_embedding": positive_embedding,
-            #             "negative_embedding": curr_reid_embeds[negative_query_id, 0, :]
-            #         }
-            #         reid_out_list.append(reid_out)
+            # CL loss part
+            reid_out_list = []
+            use_disappear_embed_count = 0 + 1
+            curr_reid_embeds = self.reid_embed(track_embeds)  # q'+nq, b, c
+            if i > 0:
+                tq_reid_embeds = self.track_reid_embeds  # q', b, c
+                tq_tgt2src_dict = {tgt.item(): src.item() for tgt, src in zip(self.prev_frame_indices[1],
+                                                                              self.prev_frame_indices[0])}
+                cq_tgt2src_dict = {tgt.item(): src.item() for tgt, src in zip(out_dict["indices"][0][1],
+                                                                              out_dict["indices"][0][0])}
+                for tgt_id in tq_tgt2src_dict.keys():
+                    if self.disappear_tgt_id is not None and self.disappear_tgt_id.item() == tgt_id:
+                        continue  # TODO
+                    assert cq_tgt2src_dict[tgt_id] == tq_tgt2src_dict[tgt_id]
+                    anchor_embedding = curr_reid_embeds[cq_tgt2src_dict[tgt_id], 0, :]
+                    positive_embedding = tq_reid_embeds[tq_tgt2src_dict[tgt_id], 0, :]
+                    negative_query_id = sorted(
+                        random.sample(set(range(curr_reid_embeds.shape[0])) - set([cq_tgt2src_dict[tgt_id]]),
+                                      curr_reid_embeds.shape[0] - 1))
+                    reid_out = {
+                        "anchor_embedding": anchor_embedding,
+                        "positive_embedding": positive_embedding,
+                        "negative_embedding": curr_reid_embeds[negative_query_id, 0, :]
+                    }
+                    reid_out_list.append(reid_out)
 
             self.track_queries = ms_output[-1][valid_track_query]  # q', b, c
             select_query_tgt_ids = tgt_ids_for_each_query[valid_track_query]  # q',
@@ -501,21 +506,21 @@ class VideoInstanceCutter(nn.Module):
                 if valid:
                     if not seq_id in self.video_ins_hub:
                         self.video_ins_hub[seq_id] = VideoInstanceSequence(0, tgt_ids_for_each_query[k])
-                    self.video_ins_hub[seq_id].update_pos(track_embeds[k, 0, :])
+                    # self.video_ins_hub[seq_id].update_pos(track_embeds[k, 0, :])
                     # self.video_ins_hub[seq_id].update(curr_reid_embeds[k, 0, :])
-                    # self.video_ins_hub[seq_id].update_syn(curr_reid_embeds[k, 0, :], track_embeds[k, 0, :])
+                    self.video_ins_hub[seq_id].update_syn(curr_reid_embeds[k, 0, :], track_embeds[k, 0, :])
                     cur_seq_ids.append(seq_id)
             self.last_seq_ids = cur_seq_ids
             self.track_embeds = self.readout("last_pos")
-            # self.track_reid_embeds = self.readout("last_reid_embed")
+            self.track_reid_embeds = self.readout("last_reid_embed")
 
             out_dict.update({
                 "aux_outputs": self._set_aux_loss(outputs_class, outputs_mask),
                 # "disappear_logits": disappear_logits,
-                # "disappear_embeds": self.disappear_embed.weight,
-                # "reid_outputs": reid_out_list,
-                # "reid_embeds": curr_reid_embeds,
-                # "use_disappear_embed_count": use_disappear_embed_count,
+                "disappear_embeds": self.disappear_embed.weight,
+                "reid_outputs": reid_out_list,
+                "reid_embeds": curr_reid_embeds,
+                "use_disappear_embed_count": use_disappear_embed_count,
                 "disappear_tgt_id": -10000 if self.disappear_tgt_id is None else self.disappear_tgt_id,
             })
             all_outputs.append(out_dict)
@@ -527,7 +532,7 @@ class VideoInstanceCutter(nn.Module):
         mask_features_shape = mask_features.shape
         mask_features = self.mask_feature_proj(mask_features.flatten(0, 1)).reshape(
             *mask_features_shape)  # (b, t, c, h, w)
-        mask_out_bg = False
+        mask_out_bg = True
 
         frame_embeds_no_norm = frame_embeds_no_norm.permute(2, 3, 0, 1)  # t, q, b, c
         T, fQ, B, _ = frame_embeds_no_norm.shape
@@ -657,11 +662,11 @@ class VideoInstanceCutter(nn.Module):
         mask: b, q, h, w
         mask_features: b, c, h, w
         """
-        track_queries = self.decoder_norm(track_queries)  # q, b, c
-        qk = self.query_k(self.mask_embed(track_queries))
+        qk = self.decoder_norm(track_queries)  # q, b, c
+        qk = self.query_k(qk)
         qk = qk.permute(1, 2, 0)  # b, c, q
         if mk is None or a_sq is None:
-            mk = self.mask_feature_k(self.mask_feature_proj(mask_features))  # b, c, h, w
+            mk = self.mask_feature_k(mask_features)
             mk = mk.flatten(2)  # b, c, n
             a_sq = mk.pow(2).sum(1).unsqueeze(2)  # b, n, 1
 
@@ -671,17 +676,16 @@ class VideoInstanceCutter(nn.Module):
             start = i * 50
             end = start + 50 if start + 50 < mask_logits.shape[1] else mask_logits.shape[1]
 
-            # a_sq = mk.pow(2).sum(1).unsqueeze(2)  # b, n, 1
             ab = mk.transpose(1, 2) @ qk[:, :, start:end]  # b, n, q
-
-            affinity = (2 * ab - a_sq) / math.sqrt(self.mask_dim)  # b, n, q
+            affinity = (2 * ab - a_sq) / math.sqrt(self.hidden_dim)  # b, n, q
             if mask_out:
                 seg_mask = (mask_logits[:, start:end, :, :].sigmoid() > 0.5).to("cuda")  # b, q, h, w
                 seg_mask = seg_mask.flatten(2).transpose(1, 2)  # b, n, q
-                affinity = affinity * seg_mask
+                bg_mask = ~seg_mask
+                affinity = affinity * seg_mask - 1e+6 * bg_mask  # using -1e+6 instead of float("-inf") as values in fg, likes -6.8, adding a -inf value will cause a nan value
 
             maxes = torch.max(affinity, dim=1, keepdim=True)[0]
-            x_exp = torch.exp(affinity - maxes)
+            x_exp = torch.exp(affinity - maxes)  # same as above-mentioned problem
             x_exp_sum = torch.sum(x_exp, dim=1, keepdim=True)
             affinity = x_exp / (x_exp_sum + 1e-8)
 
